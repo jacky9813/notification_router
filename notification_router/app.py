@@ -1,5 +1,6 @@
 import importlib.metadata
 import itertools
+import os
 import typing
 
 import flask
@@ -9,6 +10,7 @@ from . import base_types
 from . import error_handlers
 from . import plugins
 
+SERVER_CONFIG_LOCATION = os.environ.get("SERVER_CONFIG_LOCATION", "/app/conf/server.toml")
 
 app = flask.Flask(__name__)
 app.register_blueprint(error_handlers.bp)
@@ -67,13 +69,13 @@ flasgger.Swagger(
 def redirect_to_apidocs():
     return flask.redirect(flask.url_for("flasgger.apidocs"))
 
-SUPPORTED_SOURCES: typing.Dict[str, base_types.NotificationSource] = {
+SUPPORTED_SOURCES: typing.Dict[str, typing.Type[base_types.NotificationSource]] = {
     entry_point.name: entry_point.load()
     for entry_point in importlib.metadata.entry_points(
         group="notification_router.source_plugins"
     )
 }
-SUPPORTED_DESTINATIONS: typing.Dict[str, base_types.NotificationDestination] = {
+SUPPORTED_DESTINATIONS: typing.Dict[str, typing.Type[base_types.NotificationDestination]] = {
     entry_point.name: entry_point.load()
     for entry_point in importlib.metadata.entry_points(
         group="notification_router.destination_plugins"
@@ -85,16 +87,20 @@ SUPPORTED_DESTINATIONS: typing.Dict[str, base_types.NotificationDestination] = {
     "responses": {
         "200": {
             "description": "Success",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    k: {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
+            "content":{
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            k: {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                            for k in ["sources", "destinations"]
                         }
                     }
-                    for k in ["sources", "destinations"]
                 }
             }
         }
@@ -113,28 +119,63 @@ def list_available_plugins() -> flask.Response:
 
 
 @app.get("/notify/<plugin_name>")
+@flasgger.swag_from({
+    "parameters": [
+        {
+            "name": "plugin_name",
+            "in": "path"
+        }
+    ],
+    "responses": {
+        "200": {
+            "description": "Success",
+            "content": {
+                "text/plain": {},
+                "text/html": {}
+            }
+        },
+        "404": {
+            "description": "Plugin does not exist or not installed.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "$ref": "#/components/schemas/error"
+                    },
+                    "example": {
+                        "error": 404,
+                        "message": "Not Found"
+                    }
+                }
+            }
+        }
+    }
+})
 def view_plugin_detail(plugin_name) -> flask.Response:
-    response = []
+    """
+    Get documentation of a plugin.
+    """
     if plugin_name in SUPPORTED_SOURCES:
-        response.append({
-            "name": plugin_name,
-            "type": "source",
-            "description": (SUPPORTED_SOURCES[plugin_name].__doc__ or "").strip()
-        })
+        try:
+            response = SUPPORTED_SOURCES[plugin_name]().render_documentation()
+        except NotImplementedError:
+            response = flask.jsonify({
+                "name": plugin_name,
+                "type": "source_plugin",
+                "description": (SUPPORTED_SOURCES[plugin_name].__doc__ or "").strip()
+            })
+        return response
     if plugin_name in SUPPORTED_DESTINATIONS:
-        response.append({
-            "name": plugin_name,
-            "type": "destination",
-            "description": (SUPPORTED_DESTINATIONS[plugin_name].__doc__ or "").strip()
-        })
+        try:
+            response = SUPPORTED_DESTINATIONS[plugin_name]().render_documentation()
+        except NotImplementedError:
+            response = flask.jsonify({
+                "name": plugin_name,
+                "type": "destination_plugin",
+                "description": (SUPPORTED_DESTINATIONS[plugin_name].__doc__ or "").strip()
+            })
+        return response
     
-    if not response:
-        flask.abort(404)
-
-    return response
-    
-    
-
+    flask.abort(404)
 
 
 @app.post("/notify/<source>/<destination>")

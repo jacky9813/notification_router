@@ -38,6 +38,9 @@ def ErrorResponse(
 class NotificationPlugin:
     name: str = "notification-plugin"
 
+    def render_documentation(self) -> flask.Response:
+        raise NotImplementedError()
+
 
 class NotificationSource(NotificationPlugin):
     def __init__(self):
