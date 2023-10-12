@@ -180,6 +180,12 @@ def view_plugin_detail(plugin_name) -> flask.Response:
 
 @app.post("/notify/<source>/<destination>")
 @flasgger.swag_from({
+    "requestBody": {
+        "description": "The notification content that source plugin can process.",
+        "content": {
+            "application/json": { "schema": {"type": "object"} }
+        }
+    },
     "parameters": [
         {
             "name": "source",
@@ -197,8 +203,23 @@ def view_plugin_detail(plugin_name) -> flask.Response:
         }
     ],
     "responses": {
-        "200": {"description": "Success"},
-        "401": {"description": "Invalid access token"}
+        "200": {"description": "Success."},
+        "401": {
+            "description": "Invalid access token.",
+            "content": {
+                "application/json": {
+                    "schema": { "$ref": "#/components/schemas/error" }
+                }
+            }
+        },
+        "404": {
+            "description": "One or more plugins not found.",
+            "content": {
+                "application/json": {
+                    "schema": { "$ref": "#/components/schemas/error" }
+                }
+            }
+        }
     },
     "security": [
         {"basicAuth": []},
@@ -216,7 +237,8 @@ def route_notification(source: str, destination: str) -> flask.Response:
         ))
 
         return base_types.ErrorResponse(
-            error_message=f'Unsupported source and / or destination: {", ".join(unsupported)}'
+            error_message=f'Unsupported source and / or destination: {", ".join(unsupported)}',
+            status=404
         )
     src: base_types.NotificationSource = SUPPORTED_SOURCES[source]()
     dst: base_types.NotificationDestination = SUPPORTED_DESTINATIONS[destination]()
